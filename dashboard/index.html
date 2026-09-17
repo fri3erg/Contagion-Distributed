@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Contagion Protocol</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>CONTAGION <span>PROTOCOL</span></h1>
+      <div id="status-bar">
+        <span>Alive: <b id="stat-alive">-</b>/<b id="stat-total">-</b></span>
+        <span>Overt: <b id="stat-overt">-</b></span>
+        <span>Cure: <b id="stat-cure">0%</b></span>
+        <span id="ws-indicator">connecting…</span>
+      </div>
+    </header>
+
+    <div id="banner"></div>
+
+    <main id="graph">
+      <svg id="graph-svg"></svg>
+    </main>
+
+    <aside id="sidebar">
+      <div class="panel-section">
+        <h2>Legend</h2>
+        <div class="legend">
+          <span><i class="dot" style="background:#3fb950"></i>Healthy</span>
+          <span><i class="dot" style="background:#3fb950;box-shadow:0 0 0 2px #d29922"></i>Incubating</span>
+          <span><i class="dot" style="background:#f85149"></i>Overt</span>
+          <span><i class="dot" style="background:#58a6ff"></i>Cured</span>
+          <span><i class="dot" style="background:#45505c"></i>Dead</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h2>Cure progress</h2>
+        <div class="progress-track"><div class="progress-fill" id="cure-fill"></div></div>
+        <div id="budgets" style="margin-top:8px;">
+          <span>Snipes left: <b id="snipe-budget">-</b></span>
+          <span>Cures left: <b id="cure-budget">-</b></span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h2>Global trust threshold</h2>
+        <div class="slider-row">
+          <input type="range" id="trust-slider" min="0" max="1" step="0.05" value="0.5" />
+          <span id="trust-value">0.50</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h2>Selected node</h2>
+        <div id="selected-node">
+          <div class="row"><span>Click a node</span></div>
+        </div>
+        <div class="actions">
+          <button id="btn-snipe" disabled>Snipe</button>
+          <button id="btn-cure" class="danger" disabled>Cure</button>
+        </div>
+      </div>
+
+      <div class="panel-section" style="flex:1; display:flex; flex-direction:column; min-height:0; border-bottom:none;">
+        <h2>Alert / event feed</h2>
+      </div>
+      <div id="feed"></div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+"""Per-edge trust tracking and tier selection (Spec sec. 3).
+
+Trust is *not* shared state: each node keeps its own local estimate of how
+trustworthy every neighbor has been, based purely on its own interaction
+history with that neighbor. Two ends of the same edge may therefore see
+slightly different trust values -- this is a deliberate and realistic
+consequence of having no shared memory between processes.
+
+The player's global trust threshold is broadcast (via the control plane)
+identically to every node, but each node still applies it against its own
+local per-neighbor trust score to decide, independently, which tier to use
+for a given neighbor.
+"""
+from __future__ import annotations
+
+
+class TrustTable:
+    def __init__(self, neighbors: list[str], initial: float = 0.1):
+        self._trust: dict[str, float] = {n: initial for n in neighbors}
+        self.threshold: float = 0.5
+
+    def bump(self, neighbor: str, amount: float) -> None:
+        cur = self._trust.get(neighbor, 0.0)
+        self._trust[neighbor] = min(1.0, max(0.0, cur + amount))
+
+    def decay(self, neighbor: str, amount: float) -> None:
+        self.bump(neighbor, -amount)
+
+    def score(self, neighbor: str) -> float:
+        return self._trust.get(neighbor, 0.0)
+
+    def uses_high_trust_tier(self, neighbor: str) -> bool:
+        """Whether this node should currently use the TCP high-trust tier
+        for the given neighbor, per the player-set global threshold."""
+        return self.score(neighbor) >= self.threshold
+
+    def set_threshold(self, value: float) -> None:
+        self.threshold = min(1.0, max(0.0, value))
+
+    def as_dict(self) -> dict:
+        return {"threshold": self.threshold, "scores": dict(self._trust)}

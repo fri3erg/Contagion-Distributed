@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Docker / compose overrides
+docker-compose.override.yml
+.env
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# The LaTeX report (source, bib, figures, drafts) is submitted separately
+# (Overleaf / PDF attached to the Projects Forum post), not through this
+# code repo -- kept locally, entirely untracked here.
+report/
+
+# Local scratch / demo recordings (large binaries shouldn't live in git)
+*.mp4
+*.mov
