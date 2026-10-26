@@ -9,66 +9,157 @@
 <body>
   <div id="app">
     <header>
-      <h1>CONTAGION <span>PROTOCOL</span></h1>
+      <h1>CONTAGION <span>PROTOCOL</span> <small id="view-name">debug view</small></h1>
+      <div id="state-counts"></div>
       <div id="status-bar">
-        <span>Alive: <b id="stat-alive">-</b>/<b id="stat-total">-</b></span>
-        <span>Overt: <b id="stat-overt">-</b></span>
-        <span>Cure: <b id="stat-cure">0%</b></span>
+        <label class="view-toggle" title="Show only what a player could actually know">
+          <input type="checkbox" id="opt-player-view" /> player view
+        </label>
+        <span class="debug-only" title="nodes that have noticed the outbreak (only they start cure runs)">Aware <b id="stat-aware">-</b></span>
+        <span>Runs <b id="stat-runs">-</b></span>
+        <a href="/debug/events" id="download-log" class="debug-only" title="Full event log of this run as JSON">download log</a>
         <span id="ws-indicator">connecting…</span>
       </div>
     </header>
 
+    <div id="strip">
+      <div class="stat good"><span>survivors</span><b id="strip-survivors">-</b></div>
+      <div class="stat bad"><span>zombies</span><b id="strip-zombies">-</b></div>
+      <div class="stat dim"><span>dead</span><b id="strip-dead">-</b></div>
+      <div class="stat cure"><span>cure</span><b id="strip-cure">0%</b></div>
+      <div class="stat dim"><span>day</span><b id="strip-tick">-</b></div>
+    </div>
+
     <div id="banner"></div>
+    <div id="toasts"></div>
 
     <main id="graph">
       <svg id="graph-svg"></svg>
+      <div id="start-overlay" hidden>
+        <div class="start-card">
+          <h2>New game</h2>
+          <p class="muted" id="start-info"></p>
+          <div class="start-trust">
+            <label for="start-trust-slider">Trust threshold</label>
+            <input type="range" id="start-trust-slider" min="0" max="1" step="0.05" value="0.5" />
+            <b id="start-trust-value">0.50</b>
+          </div>
+          <p class="hint">Neighbors whose trust is above the threshold switch from cheap UDP heartbeats
+            to high-trust TCP syncs — the main way zombies spread the infection.
+            Low = more syncs, high = more isolation. You can still change it during the game.</p>
+          <button id="btn-start">▶ Start game</button>
+        </div>
+      </div>
+      <div id="graph-toolbar" class="debug-only">
+        <label><input type="checkbox" id="opt-chain" checked /> infection chain</label>
+        <label><input type="checkbox" id="opt-traffic" checked /> animate traffic</label>
+        <label><input type="checkbox" id="opt-tiers" checked /> edge tiers</label>
+      </div>
+      <div id="graph-legend">
+        <span><i class="dot HEALTHY"></i><span class="debug-only">healthy</span><span class="player-only">looks healthy</span></span>
+        <span class="debug-only"><i class="dot INCUBATING"></i>incubating</span>
+        <span><i class="dot OVERT"></i>zombie</span>
+        <span><i class="dot CURED"></i>cured</span>
+        <span><i class="dot DEAD"></i>dead</span>
+        <span class="sep debug-only"></span>
+        <span class="debug-only"><i class="ln tcp"></i>TCP tier</span>
+        <span class="debug-only"><i class="ln udp"></i>UDP tier</span>
+        <span class="debug-only"><i class="ln infect"></i>infected</span>
+        <span class="sep"></span>
+        <span class="muted">evidence: ✗ cure couriers lost at the node · ! suspicion (alerts raised about it)</span>
+      </div>
     </main>
+
+    <section id="log-panel">
+      <div id="log-toolbar">
+        <b><span class="debug-only">Event log</span><span class="player-only">News</span></b>
+        <span id="log-filters" class="debug-only"></span>
+        <label><input type="checkbox" id="log-selected-only" /> selected node only</label>
+        <button id="log-pause">pause</button>
+        <button id="log-clear">clear</button>
+        <span id="log-count" class="muted"></span>
+      </div>
+      <div id="log"></div>
+    </section>
 
     <aside id="sidebar">
       <div class="panel-section">
-        <h2>Legend</h2>
-        <div class="legend">
-          <span><i class="dot" style="background:#3fb950"></i>Healthy</span>
-          <span><i class="dot" style="background:#3fb950;box-shadow:0 0 0 2px #d29922"></i>Incubating</span>
-          <span><i class="dot" style="background:#f85149"></i>Overt</span>
-          <span><i class="dot" style="background:#58a6ff"></i>Cured</span>
-          <span><i class="dot" style="background:#45505c"></i>Dead</span>
+        <h2>Controls</h2>
+        <div class="speed-row">
+          <button id="btn-pause">▶ start</button>
+          <span class="speed-group">
+            <button data-mult="0.5">0.5×</button>
+            <button data-mult="1">1×</button>
+            <button data-mult="2">2×</button>
+            <button data-mult="4">4×</button>
+            <button data-mult="8">8×</button>
+          </span>
+          <button id="btn-restart" class="danger" title="Throw this game away and set up a new one">↻ restart</button>
         </div>
-      </div>
-
-      <div class="panel-section">
-        <h2>Cure progress</h2>
-        <div class="progress-track"><div class="progress-fill" id="cure-fill"></div></div>
-        <div id="budgets" style="margin-top:8px;">
-          <span>Snipes left: <b id="snipe-budget">-</b></span>
-          <span>Cures left: <b id="cure-budget">-</b></span>
-        </div>
-      </div>
-
-      <div class="panel-section">
-        <h2>Global trust threshold</h2>
+        <div class="speed-info muted"><span id="speed-label"></span> <span id="speed-state"></span></div>
         <div class="slider-row">
+          <span class="lbl">Trust threshold</span>
           <input type="range" id="trust-slider" min="0" max="1" step="0.05" value="0.5" />
           <span id="trust-value">0.50</span>
         </div>
+        <div id="budgets">
+          <span>Snipes left <b id="snipe-budget">-</b></span>
+          <span>Cures left <b id="cure-budget">-</b></span>
+          <span>Alive <b id="stat-alive">-</b>/<b id="stat-total">-</b></span>
+        </div>
+      </div>
+
+      <div class="panel-section" id="cure-panel">
+        <div class="cure-head">
+          <h2>Cure research</h2>
+          <span id="cure-state" class="muted"></span>
+        </div>
+        <div class="cure-track"><div class="cure-fill" id="cure-fill"></div><span id="cure-text">0%</span></div>
       </div>
 
       <div class="panel-section">
-        <h2>Selected node</h2>
-        <div id="selected-node">
-          <div class="row"><span>Click a node</span></div>
-        </div>
-        <div class="actions">
-          <button id="btn-snipe" disabled>Snipe</button>
-          <button id="btn-cure" class="danger" disabled>Cure</button>
+        <h2>Nodes</h2>
+        <div id="node-table-wrap">
+          <table id="node-table">
+            <thead>
+              <tr>
+                <th>node</th><th>state</th>
+                <th class="debug-only" title="knows about the outbreak, so it starts cure runs">aware</th>
+                <th>tick</th>
+                <th class="debug-only" title="ticks until incubation ends">overt in</th>
+                <th class="debug-only" title="infected by">by</th>
+                <th title="cure runs that died at this node">✗</th>
+                <th title="alerts raised about this node">!</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
 
-      <div class="panel-section" style="flex:1; display:flex; flex-direction:column; min-height:0; border-bottom:none;">
-        <h2>Alert / event feed</h2>
+      <div class="panel-section grow">
+        <h2>Selected node</h2>
+        <div id="inspector"><p class="muted">Click a node in the graph or table.</p></div>
       </div>
-      <div id="feed"></div>
     </aside>
+  </div>
+
+  <div id="end-screen" hidden>
+    <div class="end-card">
+      <h2 id="end-title"></h2>
+      <p id="end-score" class="muted"></p>
+      <div id="end-chart"></div>
+      <div class="end-legend">
+        <span><i class="dot HEALTHY"></i>healthy</span><span><i class="dot INCUBATING"></i>secretly infected</span>
+        <span><i class="dot OVERT"></i>zombies</span><span><i class="dot CURED"></i>cured</span><span><i class="dot DEAD"></i>dead</span>
+      </div>
+      <h3>What really happened</h3>
+      <ol id="end-reveal"></ol>
+      <div class="end-actions">
+        <button id="end-restart">↻ Play again</button>
+        <button id="end-close">Close</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

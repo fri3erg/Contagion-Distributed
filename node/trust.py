@@ -19,12 +19,15 @@ class TrustTable:
         self._trust: dict[str, float] = {n: initial for n in neighbors}
         self.threshold: float = 0.5
 
-    def bump(self, neighbor: str, amount: float) -> None:
+    def bump(self, neighbor: str, amount: float) -> bool:
+        """Adjust the score; returns True if the neighbor switched tier."""
+        before = self.uses_high_trust_tier(neighbor)
         cur = self._trust.get(neighbor, 0.0)
         self._trust[neighbor] = min(1.0, max(0.0, cur + amount))
+        return self.uses_high_trust_tier(neighbor) != before
 
-    def decay(self, neighbor: str, amount: float) -> None:
-        self.bump(neighbor, -amount)
+    def decay(self, neighbor: str, amount: float) -> bool:
+        return self.bump(neighbor, -amount)
 
     def score(self, neighbor: str) -> float:
         return self._trust.get(neighbor, 0.0)
@@ -34,8 +37,14 @@ class TrustTable:
         for the given neighbor, per the player-set global threshold."""
         return self.score(neighbor) >= self.threshold
 
-    def set_threshold(self, value: float) -> None:
+    def set_threshold(self, value: float) -> list[str]:
+        """Returns the neighbors whose tier flipped because of the change."""
+        before = {n: self.uses_high_trust_tier(n) for n in self._trust}
         self.threshold = min(1.0, max(0.0, value))
+        return [n for n, was in before.items() if self.uses_high_trust_tier(n) != was]
+
+    def tier(self, neighbor: str) -> str:
+        return "tcp" if self.uses_high_trust_tier(neighbor) else "udp"
 
     def as_dict(self) -> dict:
         return {"threshold": self.threshold, "scores": dict(self._trust)}

@@ -59,126 +59,6 @@
       "udp_port": 7000,
       "tcp_port": 7001,
       "control_port": 8000
-    },
-    {
-      "id": "node-10",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-11",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-12",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-13",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-14",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-15",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-16",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-17",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-18",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-19",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-20",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-21",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-22",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-23",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-24",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-25",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-26",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-27",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-28",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
-    },
-    {
-      "id": "node-29",
-      "udp_port": 7000,
-      "tcp_port": 7001,
-      "control_port": 8000
     }
   ],
   "edges": [
@@ -192,35 +72,35 @@
     ],
     [
       "node-00",
-      "node-28"
+      "node-06"
     ],
     [
       "node-00",
-      "node-29"
+      "node-08"
+    ],
+    [
+      "node-00",
+      "node-09"
     ],
     [
       "node-01",
-      "node-03"
+      "node-02"
     ],
     [
       "node-01",
-      "node-24"
+      "node-05"
     ],
     [
       "node-01",
-      "node-29"
+      "node-09"
     ],
     [
       "node-02",
-      "node-04"
+      "node-07"
     ],
     [
       "node-02",
-      "node-13"
-    ],
-    [
-      "node-02",
-      "node-14"
+      "node-09"
     ],
     [
       "node-03",
@@ -232,11 +112,11 @@
     ],
     [
       "node-04",
-      "node-06"
+      "node-05"
     ],
     [
       "node-04",
-      "node-08"
+      "node-06"
     ],
     [
       "node-05",
@@ -255,177 +135,17 @@
       "node-08"
     ],
     [
-      "node-06",
-      "node-24"
-    ],
-    [
       "node-07",
       "node-08"
     ],
     [
-      "node-07",
-      "node-09"
-    ],
-    [
-      "node-07",
-      "node-17"
-    ],
-    [
       "node-08",
       "node-09"
-    ],
-    [
-      "node-08",
-      "node-10"
-    ],
-    [
-      "node-09",
-      "node-10"
-    ],
-    [
-      "node-09",
-      "node-11"
-    ],
-    [
-      "node-10",
-      "node-11"
-    ],
-    [
-      "node-10",
-      "node-12"
-    ],
-    [
-      "node-11",
-      "node-12"
-    ],
-    [
-      "node-11",
-      "node-13"
-    ],
-    [
-      "node-11",
-      "node-17"
-    ],
-    [
-      "node-12",
-      "node-13"
-    ],
-    [
-      "node-12",
-      "node-14"
-    ],
-    [
-      "node-13",
-      "node-14"
-    ],
-    [
-      "node-13",
-      "node-15"
-    ],
-    [
-      "node-13",
-      "node-21"
-    ],
-    [
-      "node-13",
-      "node-24"
-    ],
-    [
-      "node-14",
-      "node-16"
-    ],
-    [
-      "node-15",
-      "node-16"
-    ],
-    [
-      "node-16",
-      "node-17"
-    ],
-    [
-      "node-16",
-      "node-18"
-    ],
-    [
-      "node-17",
-      "node-19"
-    ],
-    [
-      "node-18",
-      "node-19"
-    ],
-    [
-      "node-18",
-      "node-20"
-    ],
-    [
-      "node-19",
-      "node-20"
-    ],
-    [
-      "node-19",
-      "node-21"
-    ],
-    [
-      "node-20",
-      "node-21"
-    ],
-    [
-      "node-20",
-      "node-22"
-    ],
-    [
-      "node-21",
-      "node-22"
-    ],
-    [
-      "node-22",
-      "node-23"
-    ],
-    [
-      "node-23",
-      "node-24"
-    ],
-    [
-      "node-23",
-      "node-25"
-    ],
-    [
-      "node-24",
-      "node-26"
-    ],
-    [
-      "node-25",
-      "node-26"
-    ],
-    [
-      "node-25",
-      "node-27"
-    ],
-    [
-      "node-26",
-      "node-27"
-    ],
-    [
-      "node-26",
-      "node-28"
-    ],
-    [
-      "node-27",
-      "node-28"
-    ],
-    [
-      "node-27",
-      "node-29"
-    ],
-    [
-      "node-28",
-      "node-29"
     ]
   ],
-  "patient_zero": "node-24",
+  "patient_zero": "node-04",
   "generated_with": {
-    "n": 30,
+    "n": 10,
     "k": 4,
     "rewire_p": 0.15,
     "seed": 42

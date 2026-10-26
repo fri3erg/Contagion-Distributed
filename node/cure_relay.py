@@ -27,7 +27,7 @@ logger = logging.getLogger("cure_relay")
 async def maybe_originate(node: "Node") -> None:
     """Called once per tick by the game loop; only actually originates a
     run when this node's own randomized schedule says it's time."""
-    if node.tick < node.next_cure_run_tick:
+    if node.outbreak_known is None or node.tick < node.next_cure_run_tick:
         return
     node.next_cure_run_tick = node.tick + node.rng.randint(
         node.cfg.cure_run_interval_min, node.cfg.cure_run_interval_max)
@@ -48,14 +48,13 @@ async def maybe_originate(node: "Node") -> None:
                                 path=path, died_at=node.cfg.node_id, reason="no_neighbors")
         return
 
-    from . import gossip
-    msg = {"type": "cure_run", "run_id": run_id, "path": path, "hops_remaining": hops_remaining}
-    await gossip.route_message(node, next_hop, msg)
+    node.stats["runs_originated"] += 1
+    await _forward(node, run_id, path, hops_remaining, next_hop)
 
 
 async def handle_cure_run(node: "Node", msg: dict) -> None:
     if not node.state.is_alive:
-        return  # dead nodes silently absorb everything; the run vanishes
+        return  # dead nodes take no part (dispatch already reported it)
 
     run_id = msg.get("run_id")
     path = list(msg.get("path", []))
@@ -69,6 +68,7 @@ async def handle_cure_run(node: "Node", msg: dict) -> None:
     success = node.rng.random() < p_relay
 
     if not success:
+        node.stats["runs_dropped"] += 1
         await node.events.emit("cure_run_result", run_id=run_id, success=False,
                                 path=path + [node.cfg.node_id], died_at=node.cfg.node_id,
                                 reason="relay_drop")
@@ -77,7 +77,9 @@ async def handle_cure_run(node: "Node", msg: dict) -> None:
     new_path = path + [node.cfg.node_id]
     new_hops_remaining = hops_remaining - 1
 
+    node.stats["runs_relayed"] += 1
     if new_hops_remaining <= 0:
+        node.stats["runs_completed"] += 1
         await node.events.emit("cure_run_result", run_id=run_id, success=True,
                                 path=new_path, died_at=None)
         return
@@ -88,14 +90,31 @@ async def handle_cure_run(node: "Node", msg: dict) -> None:
                                 path=new_path, died_at=node.cfg.node_id, reason="dead_end")
         return
 
+    await _forward(node, run_id, new_path, new_hops_remaining, next_hop)
+
+
+async def _forward(node: "Node", run_id: str, path: list[str], hops_remaining: int,
+                   next_hop: str) -> None:
     from . import gossip
-    out_msg = {"type": "cure_run", "run_id": run_id, "path": new_path,
-               "hops_remaining": new_hops_remaining}
-    await gossip.route_message(node, next_hop, out_msg)
+    msg = {"type": "cure_run", "run_id": run_id, "path": path, "hops_remaining": hops_remaining}
+    tier = await gossip.route_message(node, next_hop, msg)
+    if tier is None:
+        # TCP delivery failed: the run is lost in transit rather than at a
+        # node, so it doesn't count towards anyone's death-point tally.
+        await node.events.emit("cure_run_result", run_id=run_id, success=False,
+                               path=path, died_at=None, reason="send_failed",
+                               lost_towards=next_hop)
+        return
+    event = "cure_run_started" if len(path) == 1 else "cure_run_hop"
+    await node.events.emit(event, run_id=run_id, path=path, next_hop=next_hop,
+                           tier=tier, hops_remaining=hops_remaining)
 
 
 def _pick_unvisited_neighbor(node: "Node", path: list[str]) -> str | None:
-    candidates = [p for p in node.cfg.peers if p not in path]
+    # skip neighbors the failure detector currently considers down: a run
+    # sent there would just vanish
+    candidates = [p for p in node.cfg.peers
+                  if p not in path and not node.suspicion.is_down(p)]
     if not candidates:
         return None
     return node.rng.choice(candidates)

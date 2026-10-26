@@ -6,6 +6,7 @@ sockets.
 """
 import asyncio
 import random
+from collections import Counter
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from node import cure_relay
+from node.alerts import SuspicionTracker
 from node.state import StateMachine
 
 
@@ -45,6 +47,9 @@ class FakeNode:
         self.tick = 0
         self.next_cure_run_tick = 0
         self.events = FakeEvents()
+        self.stats = Counter()
+        self.outbreak_known = None
+        self.suspicion = SuspicionTracker()
 
 
 def run(coro):
@@ -54,13 +59,27 @@ def run(coro):
 def test_healthy_node_always_relays_when_p_is_one():
     node = FakeNode("node-02", ["node-03", "node-04"], relay_p_healthy=1.0)
     msg = {"run_id": "r1", "path": ["node-00", "node-01"], "hops_remaining": 2}
-    with patch("node.gossip.route_message", new=AsyncMock()) as route:
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="udp")) as route:
         run(cure_relay.handle_cure_run(node, msg))
-    assert node.events.emitted == []  # no result yet, still in flight
+    # no result yet, still in flight -- only the hop is reported
+    assert [e["type"] for e in node.events.emitted] == ["cure_run_hop"]
+    assert node.events.emitted[0]["tier"] == "udp"
     route.assert_called_once()
     forwarded_msg = route.call_args.args[2]
     assert forwarded_msg["path"] == ["node-00", "node-01", "node-02"]
     assert forwarded_msg["hops_remaining"] == 1
+
+
+def test_failed_tcp_send_reports_run_lost_in_transit():
+    node = FakeNode("node-02", ["node-03"], relay_p_healthy=1.0)
+    msg = {"run_id": "r1", "path": ["node-00", "node-01"], "hops_remaining": 2}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value=None)):
+        run(cure_relay.handle_cure_run(node, msg))
+    result = node.events.emitted[-1]
+    assert result["type"] == "cure_run_result"
+    assert result["reason"] == "send_failed"
+    assert result["died_at"] is None
+    assert result["lost_towards"] == "node-03"
 
 
 def test_infected_node_always_drops_when_p_is_zero():
@@ -130,6 +149,7 @@ def test_origination_only_from_healthy_or_cured():
 
 def test_origination_from_healthy_sends_first_hop():
     node = FakeNode("node-02", ["node-03", "node-04"], relay_p_healthy=1.0)
+    node.outbreak_known = {"tick": 0, "how": "alert", "source": "node-05"}
     with patch("node.gossip.route_message", new=AsyncMock()) as route:
         run(cure_relay.maybe_originate(node))
     route.assert_called_once()
@@ -137,3 +157,32 @@ def test_origination_from_healthy_sends_first_hop():
     assert neighbor in ("node-03", "node-04")
     assert msg["path"] == ["node-02"]
     assert msg["hops_remaining"] == node.cfg.cure_run_length - 1
+
+
+def test_no_cure_runs_before_node_knows_of_outbreak():
+    node = FakeNode("node-00", ["node-01", "node-02"])
+    node.tick = 50  # well past its scheduled run
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="udp")) as route:
+        run(cure_relay.maybe_originate(node))
+    route.assert_not_called()
+    assert node.events.emitted == []
+
+
+def test_cure_runs_start_once_node_knows_of_outbreak():
+    node = FakeNode("node-00", ["node-01", "node-02"])
+    node.tick = 50
+    node.outbreak_known = {"tick": 40, "how": "alert", "source": "node-05"}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="udp")) as route:
+        run(cure_relay.maybe_originate(node))
+    route.assert_called_once()
+    assert node.events.emitted[0]["type"] == "cure_run_started"
+
+
+def test_relay_skips_neighbors_detected_as_down():
+    node = FakeNode("node-02", ["node-03", "node-04"], relay_p_healthy=1.0)
+    for _ in range(SuspicionTracker.DOWN_AFTER_MISSES):
+        node.suspicion.record_miss("node-03")
+    msg = {"run_id": "r1", "path": ["node-00"], "hops_remaining": 3}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="udp")) as route:
+        run(cure_relay.handle_cure_run(node, msg))
+    assert route.call_args.args[1] == "node-04"

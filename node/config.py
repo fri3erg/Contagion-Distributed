@@ -45,40 +45,55 @@ class Config:
     aggregator_url: str = field(default_factory=lambda: os.environ.get(
         "AGGREGATOR_URL", "http://aggregator:8000"))
 
+    # Fraction of UDP datagrams the sender drops on purpose (lossy cheap tier)
+    udp_loss: float = field(default_factory=lambda: _env_float("UDP_LOSS", 0.2))
+
     # Simulation clock
-    tick_ms: int = field(default_factory=lambda: _env_int("TICK_MS", 250))
+    tick_ms: int = field(default_factory=lambda: _env_int("TICK_MS", 5000))
+    # Nodes boot frozen and wait for the player to press start
+    start_paused: bool = field(default_factory=lambda: _env_bool("START_PAUSED", True))
 
     # Lifecycle (Spec sec. 2, 14)
-    incubation_min: int = field(default_factory=lambda: _env_int("INCUBATION_MIN", 60))
-    incubation_max: int = field(default_factory=lambda: _env_int("INCUBATION_MAX", 180))
+    incubation_min: int = field(default_factory=lambda: _env_int("INCUBATION_MIN", 15))
+    incubation_max: int = field(default_factory=lambda: _env_int("INCUBATION_MAX", 35))
 
     # Cure relay (Spec sec. 5, 14)
     cure_run_length: int = field(default_factory=lambda: _env_int("CURE_RUN_LENGTH", 5))
-    cure_runs_for_100: int = field(default_factory=lambda: _env_int("CURE_RUNS_FOR_100", 20))
+    cure_runs_for_100: int = field(default_factory=lambda: _env_int("CURE_RUNS_FOR_100", 30))
     relay_p_healthy: float = field(default_factory=lambda: _env_float("RELAY_P_HEALTHY", 0.95))
     relay_p_infected: float = field(default_factory=lambda: _env_float("RELAY_P_INFECTED", 0.30))
-    cure_run_interval_min: int = field(default_factory=lambda: _env_int("CURE_RUN_INTERVAL_MIN", 10))
-    cure_run_interval_max: int = field(default_factory=lambda: _env_int("CURE_RUN_INTERVAL_MAX", 20))
+    cure_run_interval_min: int = field(default_factory=lambda: _env_int("CURE_RUN_INTERVAL_MIN", 8))
+    cure_run_interval_max: int = field(default_factory=lambda: _env_int("CURE_RUN_INTERVAL_MAX", 15))
+    # Only start cure runs once this node has noticed the outbreak
+    cure_after_outbreak: bool = field(default_factory=lambda: _env_bool("CURE_AFTER_OUTBREAK", True))
 
     # Infection transmission (Spec sec. 4, 14)
-    infect_p_baseline_min: float = field(default_factory=lambda: _env_float("INFECT_P_BASELINE_MIN", 0.01))
-    infect_p_baseline_max: float = field(default_factory=lambda: _env_float("INFECT_P_BASELINE_MAX", 0.02))
-    infect_p_trust_min: float = field(default_factory=lambda: _env_float("INFECT_P_TRUST_MIN", 0.15))
-    infect_p_trust_max: float = field(default_factory=lambda: _env_float("INFECT_P_TRUST_MAX", 0.25))
+    infect_p_baseline_min: float = field(default_factory=lambda: _env_float("INFECT_P_BASELINE_MIN", 0.015))
+    infect_p_baseline_max: float = field(default_factory=lambda: _env_float("INFECT_P_BASELINE_MAX", 0.025))
+    infect_p_trust_min: float = field(default_factory=lambda: _env_float("INFECT_P_TRUST_MIN", 0.05))
+    infect_p_trust_max: float = field(default_factory=lambda: _env_float("INFECT_P_TRUST_MAX", 0.15))
 
     # Trust system (Spec sec. 3)
     trust_threshold_default: float = field(default_factory=lambda: _env_float("TRUST_THRESHOLD_DEFAULT", 0.5))
-    trust_increment_heartbeat: float = field(default_factory=lambda: _env_float("TRUST_INCREMENT_HEARTBEAT", 0.01))
-    trust_increment_sync: float = field(default_factory=lambda: _env_float("TRUST_INCREMENT_SYNC", 0.05))
+    trust_increment_heartbeat: float = field(default_factory=lambda: _env_float("TRUST_INCREMENT_HEARTBEAT", 0.015))
+    trust_increment_sync: float = field(default_factory=lambda: _env_float("TRUST_INCREMENT_SYNC", 0.015))
+    trust_penalty_anomaly: float = field(default_factory=lambda: _env_float("TRUST_PENALTY_ANOMALY", 0.1))
+    # Chance an INCUBATING node silently skips a heartbeat reply (its "tell")
+    incubating_hb_fail_p: float = field(default_factory=lambda: _env_float("INCUBATING_HB_FAIL_P", 0.1))
     high_trust_sync_period_ticks: int = field(default_factory=lambda: _env_int("HIGH_TRUST_SYNC_PERIOD_TICKS", 4))
 
     # Alerts (Spec sec. 6)
-    alert_ttl: int = field(default_factory=lambda: _env_int("ALERT_TTL", 5))
-    alert_p_on_anomaly: float = field(default_factory=lambda: _env_float("ALERT_P_ON_ANOMALY", 0.6))
+    alert_ttl: int = field(default_factory=lambda: _env_int("ALERT_TTL", 3))
+    alert_cooldown_ticks: int = field(default_factory=lambda: _env_int("ALERT_COOLDOWN_TICKS", 5))
+    # bad heartbeats in a row before a node raises an alert about a neighbor
+    alert_after_streak: int = field(default_factory=lambda: _env_int("ALERT_AFTER_STREAK", 3))
 
     # Heartbeat
     heartbeat_period_ticks: int = field(default_factory=lambda: _env_int("HEARTBEAT_PERIOD_TICKS", 1))
     heartbeat_ack_timeout_s: float = field(default_factory=lambda: _env_float("HEARTBEAT_ACK_TIMEOUT_S", 1.0))
+
+    # Observability: how often (seconds) a node dumps its full local state
+    status_period_s: float = field(default_factory=lambda: _env_float("STATUS_PERIOD_S", 1.0))
 
     def rng(self) -> random.Random:
         # Per-process RNG; a seed can be supplied for reproducible runs.
