@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from node import cure_relay
 from node.alerts import SuspicionTracker
 from node.state import StateMachine
+from node.trust import TrustTable
 
 
 @dataclass
@@ -50,6 +51,9 @@ class FakeNode:
         self.stats = Counter()
         self.outbreak_known = None
         self.suspicion = SuspicionTracker()
+        # every neighbor trusted unless a test says otherwise (cure runs need TCP)
+        self.trust = TrustTable(peers, initial=1.0)
+        self.trust.set_threshold(0.5)
 
 
 def run(coro):
@@ -186,3 +190,34 @@ def test_relay_skips_neighbors_detected_as_down():
     with patch("node.gossip.route_message", new=AsyncMock(return_value="udp")) as route:
         run(cure_relay.handle_cure_run(node, msg))
     assert route.call_args.args[1] == "node-04"
+
+
+# -- cure runs only travel over trusted (TCP) links ---------------------
+
+def test_relay_skips_untrusted_neighbors():
+    node = FakeNode("node-02", ["node-03", "node-04"], relay_p_healthy=1.0)
+    node.trust.decay("node-03", 1.0)  # node-03 drops below the threshold
+    msg = {"run_id": "r1", "path": ["node-00"], "hops_remaining": 3}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="tcp")) as route:
+        run(cure_relay.handle_cure_run(node, msg))
+    assert route.call_args.args[1] == "node-04"
+
+
+def test_run_dies_when_no_trusted_link_is_left():
+    node = FakeNode("node-02", ["node-03"], relay_p_healthy=1.0)
+    node.trust.decay("node-03", 1.0)
+    msg = {"run_id": "r1", "path": ["node-00"], "hops_remaining": 3}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="tcp")) as route:
+        run(cure_relay.handle_cure_run(node, msg))
+    route.assert_not_called()
+    assert node.events.emitted[-1]["reason"] == "no_trusted_link"
+
+
+def test_no_run_starts_without_a_trusted_link():
+    node = FakeNode("node-02", ["node-03"])
+    node.trust.decay("node-03", 1.0)
+    node.outbreak_known = {"tick": 0, "how": "alert", "source": "node-05"}
+    with patch("node.gossip.route_message", new=AsyncMock(return_value="tcp")) as route:
+        run(cure_relay.maybe_originate(node))
+    route.assert_not_called()
+    assert node.events.emitted == []

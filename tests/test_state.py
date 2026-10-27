@@ -38,6 +38,7 @@ def test_infect_is_noop_when_not_healthy():
 def test_turns_overt_only_after_timer():
     sm = make_sm()
     sm.infect(current_tick=0)  # ends at tick 10
+    sm.record_spread()
     assert sm.maybe_turn_overt(5) is False
     assert sm.state == NodeState.INCUBATING
     assert sm.maybe_turn_overt(10) is True
@@ -45,9 +46,32 @@ def test_turns_overt_only_after_timer():
     assert not sm.answers_heartbeat_normally
 
 
+def test_waits_for_a_victim_before_turning():
+    sm = make_sm()
+    sm.infect(current_tick=0)
+    assert sm.maybe_turn_overt(10) is False  # timer done, nobody infected yet
+    assert sm.state == NodeState.INCUBATING
+
+
+def test_turns_as_soon_as_it_has_spread_after_the_timer():
+    sm = make_sm()
+    sm.infect(current_tick=0)
+    assert sm.maybe_turn_overt(12) is False
+    sm.record_spread()
+    assert sm.maybe_turn_overt(13) is True
+
+
+def test_turns_anyway_at_three_times_the_incubation():
+    sm = make_sm()
+    sm.infect(current_tick=0)  # 10-tick incubation -> cap at tick 30
+    assert sm.maybe_turn_overt(29) is False
+    assert sm.maybe_turn_overt(30) is True
+
+
 def test_cure_heals_infected_node():
     sm = make_sm()
     sm.infect(0)
+    sm.record_spread()
     sm.maybe_turn_overt(10)
     correct, new_state = sm.cure()
     assert correct is True

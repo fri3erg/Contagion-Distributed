@@ -111,6 +111,7 @@ def test_anomaly_decays_trust_and_reports_tier_flip():
     node.trust.set_threshold(0.5)
     node.trust.bump("node-01", 0.45)  # 0.1 + 0.45 = 0.55 -> tcp
     gossip._record_anomaly(node, "node-01", "timeout")
+    gossip._record_anomaly(node, "node-01", "timeout")  # second in a row costs trust
     node.run_spawned()
     assert abs(node.trust.score("node-01") - 0.45) < 1e-9
     flips = [e for e in node.events.emitted if e["type"] == "tier_change"]
@@ -147,3 +148,46 @@ def test_healthy_node_has_no_tell():
     node = FakeNode(incubating_hb_fail_p=1.0)
     _ping(node)
     assert len(node.udp_transport.sent) == 1
+
+
+# -- "you got me": the victim tells the carrier it caught the infection --
+
+def test_infected_receiver_tells_the_carrier():
+    node = FakeNode()
+    sent = AsyncMock(return_value={"type": "ack"})
+    with patch("node.gossip.send_tcp_message", new=sent):
+        run(gossip._receive_exposure(node, {"from": "node-01", "_exposure": True}, "heartbeat"))
+        node.run_spawned()
+    assert node.state.state.value == "INCUBATING"
+    assert sent.call_args.args[1] == "node-01"
+    assert sent.call_args.args[2]["type"] == "caught"
+
+
+def test_exposure_without_effect_tells_nobody():
+    node = FakeNode()
+    node.state.infect(0)  # already infected
+    sent = AsyncMock(return_value={"type": "ack"})
+    with patch("node.gossip.send_tcp_message", new=sent):
+        run(gossip._receive_exposure(node, {"from": "node-01", "_exposure": True}, "heartbeat"))
+        node.run_spawned()
+    sent.assert_not_called()
+
+
+def test_caught_message_lets_the_carrier_turn():
+    node = FakeNode()
+    node.state.infect(0)
+    run(gossip.dispatch_message(node, {"type": "caught", "from": "node-01", "epoch": 0}, "tcp"))
+    assert node.state.has_spread
+
+
+def test_single_lost_reply_costs_no_trust():
+    node = FakeNode(trust_penalty_anomaly=0.1)
+    before = node.trust.score("node-01")
+    gossip._record_anomaly(node, "node-01", "timeout")
+    node.run_spawned()
+    assert node.trust.score("node-01") == before
+
+
+def test_trust_starts_at_configured_level():
+    from node.trust import TrustTable
+    assert TrustTable(["node-01"], initial=0.2).score("node-01") == 0.2

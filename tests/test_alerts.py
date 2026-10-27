@@ -190,3 +190,10 @@ def test_announce_leave_tells_every_neighbor_even_once_dead():
         asyncio.run(gossip.announce_leave(node))
     assert sorted(c.args[1] for c in sent.call_args_list) == ["node-01", "node-02"]
     assert all(c.args[2]["type"] == "leave" and c.kwargs.get("allow_dead") for c in sent.call_args_list)
+
+
+def test_no_alerts_about_a_neighbor_known_to_be_down():
+    node = FakeNode()
+    node.suspicion.mark_down("node-01")
+    _anomalies(node, ["timeout", "timeout", "timeout", "timeout"])
+    assert raised(node) == []

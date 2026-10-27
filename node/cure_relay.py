@@ -42,11 +42,9 @@ async def maybe_originate(node: "Node") -> None:
     if hops_remaining <= 0:
         return  # degenerate config, nothing to relay
 
-    next_hop = _pick_unvisited_neighbor(node, path)
+    next_hop, _why = _pick_next_hop(node, path)
     if next_hop is None:
-        await node.events.emit("cure_run_result", run_id=run_id, success=False,
-                                path=path, died_at=node.cfg.node_id, reason="no_neighbors")
-        return
+        return  # no trusted link to send a courier down right now; try next time
 
     node.stats["runs_originated"] += 1
     await _forward(node, run_id, path, hops_remaining, next_hop)
@@ -84,10 +82,10 @@ async def handle_cure_run(node: "Node", msg: dict) -> None:
                                 path=new_path, died_at=None)
         return
 
-    next_hop = _pick_unvisited_neighbor(node, new_path)
+    next_hop, why = _pick_next_hop(node, new_path)
     if next_hop is None:
         await node.events.emit("cure_run_result", run_id=run_id, success=False,
-                                path=new_path, died_at=node.cfg.node_id, reason="dead_end")
+                                path=new_path, died_at=node.cfg.node_id, reason=why)
         return
 
     await _forward(node, run_id, new_path, new_hops_remaining, next_hop)
@@ -110,11 +108,16 @@ async def _forward(node: "Node", run_id: str, path: list[str], hops_remaining: i
                            tier=tier, hops_remaining=hops_remaining)
 
 
-def _pick_unvisited_neighbor(node: "Node", path: list[str]) -> str | None:
-    # skip neighbors the failure detector currently considers down: a run
-    # sent there would just vanish
+def _pick_next_hop(node: "Node", path: list[str]) -> tuple[str | None, str | None]:
+    """A random unvisited neighbor this node trusts enough for TCP.
+    Couriers only travel over trusted links, so the trust threshold
+    directly decides which routes the cure can take. Neighbors the failure
+    detector considers down are skipped: a run sent there would vanish."""
     candidates = [p for p in node.cfg.peers
                   if p not in path and not node.suspicion.is_down(p)]
     if not candidates:
-        return None
-    return node.rng.choice(candidates)
+        return None, "dead_end"
+    trusted = [p for p in candidates if node.trust.uses_high_trust_tier(p)]
+    if not trusted:
+        return None, "no_trusted_link"
+    return node.rng.choice(trusted), None

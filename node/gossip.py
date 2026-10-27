@@ -91,6 +91,9 @@ async def dispatch_message(node: "Node", msg: dict, transport: str, writer=None)
     if mtype == "leave":
         await _handle_leave(node, msg)
         return {"type": "ack"}
+    if mtype == "caught":
+        node.state.record_spread()
+        return {"type": "ack"}
     logger.debug("unknown message type: %s", mtype)
     return None
 
@@ -199,13 +202,16 @@ def check_heartbeat_timeouts(node: "Node") -> None:
 
 
 def _record_anomaly(node: "Node", neighbor: str, kind: str) -> None:
+    if node.suspicion.is_down(neighbor):
+        return  # we already know it's gone; silence from it is not news
     count = node.suspicion.record_anomaly(neighbor)
     if kind == "garbled":
         # a missing or late reply may just be a lost packet; a garbled one
         # is something only a zombie does, so that's proof of an outbreak
         node.learn_of_outbreak("garbled_heartbeat", neighbor)
-    # trust is earned slowly and lost quickly
-    if node.trust.decay(neighbor, node.cfg.trust_penalty_anomaly):
+    # Trust is earned slowly and lost quickly -- but one lost reply is just
+    # the lossy tier doing its thing, so only a repeat costs trust.
+    if node.suspicion.streak(neighbor) >= 2 and node.trust.decay(neighbor, node.cfg.trust_penalty_anomaly):
         node.spawn(node.events.emit("tier_change", neighbor=neighbor,
                                     tier=node.trust.tier(neighbor),
                                     score=round(node.trust.score(neighbor), 3),
@@ -292,6 +298,10 @@ async def _receive_exposure(node: "Node", msg: dict, tier: str) -> None:
         await node.events.emit("state_change", from_state="HEALTHY", to="INCUBATING",
                                cause="exposure", by=source, tier=tier,
                                overt_at_tick=node.state.incubation_end_tick)
+        if source:
+            # only the victim knows the infection took; tell the carrier,
+            # which only turns zombie once it has passed it on
+            node.spawn(send_tcp_message(node, source, {"type": "caught", "from": node.cfg.node_id}))
 
 
 def _bump_trust(node: "Node", neighbor: str, amount: float) -> None:

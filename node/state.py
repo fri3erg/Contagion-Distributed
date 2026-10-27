@@ -38,6 +38,10 @@ class StateMachine:
 
         self.state: NodeState = NodeState.HEALTHY
         self.incubation_end_tick: int | None = None
+        # A carrier only comes out once it has passed the infection on (it
+        # learns that from the victim), or at the latest at this tick.
+        self.overt_cap_tick: int | None = None
+        self.has_spread: bool = False
         self.state_changed_at: float = time.time()
 
     # -- queries -----------------------------------------------------
@@ -67,14 +71,26 @@ class StateMachine:
         self.state = NodeState.INCUBATING
         duration = self._rng.randint(self._incubation_min, self._incubation_max)
         self.incubation_end_tick = current_tick + duration
+        self.overt_cap_tick = current_tick + 3 * duration
         self.state_changed_at = time.time()
         return True
 
+    def record_spread(self) -> None:
+        """Someone caught the infection from this node."""
+        self.has_spread = True
+
+    @property
+    def waiting_for_victim(self) -> bool:
+        return self.state == NodeState.INCUBATING and not self.has_spread
+
     def maybe_turn_overt(self, current_tick: int) -> bool:
-        """Advance INCUBATING -> OVERT once the incubation timer elapses."""
+        """Advance INCUBATING -> OVERT once the incubation timer has elapsed
+        and the node has infected someone (or the cap is reached)."""
         if self.state != NodeState.INCUBATING:
             return False
         if self.incubation_end_tick is None or current_tick < self.incubation_end_tick:
+            return False
+        if not self.has_spread and current_tick < self.overt_cap_tick:
             return False
         self.state = NodeState.OVERT
         self.state_changed_at = time.time()

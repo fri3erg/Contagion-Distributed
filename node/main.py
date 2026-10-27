@@ -49,7 +49,7 @@ class Node:
     def _new_game(self) -> None:
         cfg = self.cfg
         self.state = StateMachine(self.rng, cfg.incubation_min, cfg.incubation_max)
-        self.trust = TrustTable(cfg.peers)
+        self.trust = TrustTable(cfg.peers, initial=cfg.trust_initial)
         self.trust.set_threshold(cfg.trust_threshold_default)
         self.suspicion = SuspicionTracker()
         # local counters, only reported through node_status for debugging
@@ -148,6 +148,8 @@ class Node:
             paused=self.paused,
             patient_zero=self.is_patient_zero,
             outbreak_known=self.outbreak_known,
+            waiting_for_victim=self.state.waiting_for_victim,
+            overt_cap_tick=self.state.overt_cap_tick,
             down=self.suspicion.down_neighbors(),
         )
 
