@@ -59,7 +59,10 @@ class Aggregator:
         self.speed = {"tick_ms": int(os.environ.get("TICK_MS", 5000)), "paused": True}
         self.started = False
         self.over: str | None = None  # "loss" / "stable" / "time_up" once the game has ended
-        self.max_ticks = int(os.environ.get("MAX_TICKS", 400))
+        self.max_ticks = int(os.environ.get("MAX_TICKS", 365))
+        # after each snipe/cure the next one needs a short recharge (ticks/days)
+        self.cooldown = {"snipe": int(os.environ.get("SNIPE_COOLDOWN_TICKS", 2)),
+                         "cure": int(os.environ.get("CURE_COOLDOWN_TICKS", 2))}
         self.reset_at = 0.0
         self._last_push: dict[str, float] = {}
         self.session: aiohttp.ClientSession | None = None
@@ -90,8 +93,10 @@ class Aggregator:
         # infection curve for the end screen: state counts per median tick
         self.series: list[dict] = []
 
-        self.snipe_remaining = self.snipe_budget
-        self.cure_remaining = self.cure_budget
+        # a negative budget means unlimited (shown as None)
+        self.snipe_remaining = None if self.snipe_budget < 0 else self.snipe_budget
+        self.cure_remaining = None if self.cure_budget < 0 else self.cure_budget
+        self.ready_at = {"snipe": 0, "cure": 0}
 
     async def new_game(self) -> None:
         """Restart: bump the epoch, pick a new patient zero, wipe derived
@@ -108,6 +113,19 @@ class Aggregator:
             self._clear_game()
         await self.send_to_all("reset", lambda nid: self._reset_body(nid))
         await self._broadcast(self.snapshot())
+
+    def has_budget(self, action: str) -> bool:
+        remaining = getattr(self, f"{action}_remaining")
+        return remaining is None or remaining > 0
+
+    def spend(self, action: str) -> None:
+        remaining = getattr(self, f"{action}_remaining")
+        if remaining is not None:
+            setattr(self, f"{action}_remaining", remaining - 1)
+        self.ready_at[action] = self.median_tick() + self.cooldown[action]
+
+    def cooldown_left(self, action: str) -> int:
+        return max(0, self.ready_at[action] - self.median_tick())
 
     def _new_epoch(self) -> int:
         while True:
@@ -209,6 +227,8 @@ class Aggregator:
             "cure_progress": self.cure_progress(),
             "snipe_remaining": self.snipe_remaining,
             "cure_remaining": self.cure_remaining,
+            "cooldown": self.cooldown,
+            "cooldown_left": {a: self.cooldown_left(a) for a in self.cooldown},
         }
 
     def snapshot(self) -> dict:
@@ -280,15 +300,18 @@ class Aggregator:
                 else:
                     self.failed_run_count += 1
                     died_at = event.get("died_at")
-                    if died_at:
+                    # walking into an already-dead node says nothing about it
+                    if died_at and event.get("reason") != "dead_node":
                         self.death_point_counts[died_at] = self.death_point_counts.get(died_at, 0) + 1
             elif etype == "heartbeat_anomaly":
                 about = event.get("about")
                 self.anomalies_about[about] = self.anomalies_about.get(about, 0) + 1
             elif etype in ("alert_raised", "alert_seen"):
                 self.alert_feed.append(event)
-                if etype == "alert_raised":
-                    about = event.get("about")
+                about = event.get("about")
+                already_dead = self.node_states.get(about, {}).get("state") == "DEAD"
+                # a node going silent because it was shot is not suspicious
+                if etype == "alert_raised" and event.get("reason") != "killed" and not already_dead:
                     self.alerts_about[about] = self.alerts_about.get(about, 0) + 1
 
         await self._check_game_over()
@@ -418,11 +441,13 @@ async def control_snipe(request: web.Request) -> web.Response:
     agg: Aggregator = request.app["agg"]
     if not agg.started or agg.over:
         return web.json_response({"ok": False, "error": "game over" if agg.over else "game not started"}, status=409)
-    if agg.snipe_remaining <= 0:
+    if agg.cooldown_left("snipe") > 0:
+        return web.json_response({"ok": False, "error": "reloading"}, status=429)
+    if not agg.has_budget("snipe"):
         return web.json_response({"ok": False, "error": "snipe budget exhausted"}, status=429)
     resp = await _forward_control(request, "snipe")
     if resp.status == 200:
-        agg.snipe_remaining -= 1
+        agg.spend("snipe")
     return resp
 
 
@@ -433,11 +458,13 @@ async def control_cure(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "game over" if agg.over else "game not started"}, status=409)
     if agg.cure_progress() < 1.0:
         return web.json_response({"ok": False, "error": "cure not ready"}, status=409)
-    if agg.cure_remaining <= 0:
+    if agg.cooldown_left("cure") > 0:
+        return web.json_response({"ok": False, "error": "cure recharging"}, status=429)
+    if not agg.has_budget("cure"):
         return web.json_response({"ok": False, "error": "cure budget exhausted"}, status=429)
     resp = await _forward_control(request, "cure")
     if resp.status == 200:
-        agg.cure_remaining -= 1
+        agg.spend("cure")
     return resp
 
 
@@ -514,9 +541,9 @@ def main() -> None:
     parser.add_argument("--dashboard-dir", default=os.environ.get("DASHBOARD_DIR", "dashboard"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     parser.add_argument("--cure-runs-for-100", type=int,
-                         default=int(os.environ.get("CURE_RUNS_FOR_100", 30)))
-    parser.add_argument("--snipe-budget", type=int, default=int(os.environ.get("SNIPE_BUDGET", 6)))
-    parser.add_argument("--cure-budget", type=int, default=int(os.environ.get("CURE_BUDGET", 6)))
+                         default=int(os.environ.get("CURE_RUNS_FOR_100", 12)))
+    parser.add_argument("--snipe-budget", type=int, default=int(os.environ.get("SNIPE_BUDGET", -1)))
+    parser.add_argument("--cure-budget", type=int, default=int(os.environ.get("CURE_BUDGET", -1)))
     args = parser.parse_args()
 
     with open(args.topology, "r", encoding="utf-8") as f:

@@ -54,3 +54,60 @@ def test_events_from_old_epoch_ignored():
     feed(agg, [status(agg, "node-00", 7, state="OVERT", epoch=agg.epoch + 1)])
     assert agg.node_states["node-00"]["state"] == "HEALTHY"
     assert agg.series == []
+
+
+def test_runs_lost_in_a_dead_node_are_not_evidence_against_it():
+    agg = make_agg()
+    feed(agg, [
+        {"type": "cure_run_result", "node": "node-00", "run_id": "a", "success": False,
+         "died_at": "node-00", "reason": "dead_node", "epoch": agg.epoch},
+        {"type": "cure_run_result", "node": "node-01", "run_id": "b", "success": False,
+         "died_at": "node-01", "reason": "relay_drop", "epoch": agg.epoch},
+    ])
+    assert agg.death_point_counts == {"node-01": 1}
+
+
+def test_negative_budget_means_unlimited_actions():
+    agg = Aggregator(dict(TOPOLOGY), cure_runs_for_100=30, snipe_budget=-1, cure_budget=-1)
+    for _ in range(50):
+        assert agg.has_budget("snipe")
+        agg.spend("snipe")
+    assert agg.game_status()["snipe_remaining"] is None
+
+
+def test_limited_budget_runs_out():
+    agg = make_agg()  # 6 snipes
+    for _ in range(6):
+        agg.spend("snipe")
+    assert not agg.has_budget("snipe")
+    assert agg.has_budget("cure")
+
+
+def test_actions_recharge_for_a_couple_of_days():
+    agg = make_agg()
+    feed(agg, [status(agg, n, 10) for n in ("node-00", "node-01", "node-02")])
+    assert agg.cooldown_left("cure") == 0
+    agg.spend("cure")
+    assert agg.cooldown_left("cure") == agg.cooldown["cure"] == 2
+    feed(agg, [status(agg, n, 11) for n in ("node-00", "node-01", "node-02")])
+    assert agg.cooldown_left("cure") == 1
+    feed(agg, [status(agg, n, 12) for n in ("node-00", "node-01", "node-02")])
+    assert agg.cooldown_left("cure") == 0
+
+
+def test_snipe_and_cure_recharge_separately():
+    agg = make_agg()
+    agg.spend("snipe")
+    assert agg.cooldown_left("snipe") == 2
+    assert agg.cooldown_left("cure") == 0
+
+
+def test_shooting_a_node_does_not_raise_its_suspicion():
+    agg = make_agg()
+    feed(agg, [
+        {"type": "alert_raised", "node": "node-00", "about": "node-01", "reason": "unresponsive", "epoch": agg.epoch},
+        {"type": "state_change", "node": "node-01", "from_state": "HEALTHY", "to": "DEAD", "cause": "snipe", "epoch": agg.epoch},
+        {"type": "alert_raised", "node": "node-00", "about": "node-01", "reason": "killed", "epoch": agg.epoch},
+        {"type": "alert_raised", "node": "node-02", "about": "node-01", "reason": "unresponsive", "epoch": agg.epoch},
+    ])
+    assert agg.alerts_about == {"node-01": 1}  # only the one from before the shot
