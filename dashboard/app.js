@@ -8,7 +8,7 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const W = 1000, H = 640;
-const R = 17;                 // node radius
+const R = 22;                 // node radius
 const MAX_EVENTS = 5000;      // kept in memory for re-filtering
 const BASE_TICK_MS = 5000;    // "1×" speed
 const MAX_ROWS = 600;         // rendered in the log
@@ -55,6 +55,8 @@ const state = {
   // one-shot pop-ups already shown in this game
   shown: {},
   alertCounts: {},  // alerts seen per node this game, for the headlines
+  worriedUntil: {},  // node -> time until which its face looks worried
+  lastTick: {},      // node -> last tick seen, to animate its heartbeats
 };
 
 const $ = (id) => document.getElementById(id);
@@ -70,12 +72,14 @@ const els = {
   startTrustSlider: $("start-trust-slider"), startTrustValue: $("start-trust-value"),
   optPlayerView: $("opt-player-view"), viewName: $("view-name"),
   toasts: $("toasts"),
+  pvPause: $("pv-pause"), pvRestart: $("pv-restart"), pvTrust: $("pv-trust"), pvTrustValue: $("pv-trust-value"),
+  toolSnipe: $("tool-snipe"), toolSnipeLabel: $("tool-snipe-label"),
+  toolCure: $("tool-cure"), toolCureLabel: $("tool-cure-label"),
+  reticle: $("reticle"), pin: $("bulletin-pin"), logPanel: $("log-panel"), pauseSign: $("pause-sign"),
   endScreen: $("end-screen"), endTitle: $("end-title"), endScore: $("end-score"),
   endChart: $("end-chart"), endReveal: $("end-reveal"),
-  strip: {
-    survivors: $("strip-survivors"), zombies: $("strip-zombies"), dead: $("strip-dead"),
-    cure: $("strip-cure"), tick: $("strip-tick"),
-  },
+  strip: { cure: $("strip-cure"), cureFill: $("strip-cure-fill"), tick: $("strip-tick") },
+  startTrustExplain: $("start-trust-explain"),
   btnPause: $("btn-pause"), btnRestart: $("btn-restart"), btnStart: $("btn-start"),
   speedButtons: document.querySelectorAll(".speed-group button"),
   speedLabel: $("speed-label"), speedState: $("speed-state"),
@@ -138,11 +142,13 @@ function layout(topology) {
 
   const xs = arr.map((p) => p.x), ys = arr.map((p) => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const padX = 70, padTop = 70, padBottom = 80;
+  // in player view the bulletin floats over the bottom-left corner, so the
+  // network keeps to the right of it
+  const padX = 70, padLeft = state.playerView ? 380 : padX, padTop = 90, padBottom = 80;
   const pos = {};
   ids.forEach((id, i) => {
     pos[id] = {
-      x: ((arr[i].x - minX) / Math.max(maxX - minX, 1)) * (W - 2 * padX) + padX,
+      x: ((arr[i].x - minX) / Math.max(maxX - minX, 1)) * (W - padLeft - padX) + padLeft,
       y: ((arr[i].y - minY) / Math.max(maxY - minY, 1)) * (H - padTop - padBottom) + padTop,
     };
   });
@@ -171,7 +177,7 @@ function renderGraph() {
     markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
   svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#f85149" }, marker);
 
-  for (const name of ["edges", "chain", "paths", "fx", "nodes"]) layers[name] = svgEl("g", {}, svg);
+  for (const name of ["edges", "chain", "paths", "fx", "nodes", "bubbles"]) layers[name] = svgEl("g", {}, svg);
 
   for (const [a, b] of state.topology.edges) {
     const pa = state.positions[a], pb = state.positions[b];
@@ -188,13 +194,15 @@ function renderGraph() {
       ring = svgEl("circle", { class: "pz-ring debug-only", cx: p.x, cy: p.y, r: R + 5 }, g);
     }
     const circle = svgEl("circle", { cx: p.x, cy: p.y, r: R, class: "node-dot" }, g);
+    circle.dataset.id = id;
     circle.addEventListener("click", () => selectNode(id));
-    const label = svgEl("text", { class: "node-id", x: p.x, y: p.y }, g);
-    label.textContent = short(id);
-    const sub = svgEl("text", { class: "node-sub", x: p.x, y: p.y + R + 14 }, g);
+    const face = drawFace(g, id, p.x, p.y, R);
+    const name = svgEl("text", { class: "node-name", x: p.x, y: p.y + R + 15 }, g);
+    name.textContent = `${nodeName(id)} · ${short(id)}`;
+    const sub = svgEl("text", { class: "node-sub", x: p.x, y: p.y + R + 28 }, g);
     const badges = svgEl("text", { class: "node-badges", x: p.x + R + 4, y: p.y - R + 2 }, g);
     const title = svgEl("title", {}, circle);
-    nodeEls[id] = { circle, sub, badges, ring, title };
+    nodeEls[id] = { circle, sub, badges, ring, title, face };
   }
   for (const node of state.topology.nodes) updateNode(node.id);
   renderChain();
@@ -208,8 +216,12 @@ function updateNode(id) {
   const stale = st && (Date.now() / 1000 - st.ts) > STALE_S;
   ne.circle.setAttribute("class", `node-dot ${s}${state.selected === id ? " selected" : ""}${stale ? " stale" : ""}`);
 
+  setMood(ne.face, s === "OVERT" ? "zombie" : s === "DEAD" ? "dead" : s === "CURED" ? "cured"
+    : (state.worriedUntil[id] || 0) > Date.now() ? "worried" : "happy");
+
   let sub = s === "OVERT" ? "zombie" : s.toLowerCase();
-  if (s === "INCUBATING" && st?.ticks_to_overt != null) sub += ` · overt in ${st.ticks_to_overt}t`;
+  if (s === "INCUBATING" && st?.waiting_for_victim && st?.ticks_to_overt <= 0) sub += " · waiting for a victim";
+  else if (s === "INCUBATING" && st?.ticks_to_overt != null) sub += ` · overt in ${st.ticks_to_overt}t`;
   if (stale && !state.playerView) sub += " · no status!";
   ne.sub.textContent = sub;
 
@@ -286,11 +298,12 @@ function renderTable() {
     const by = d.infected_by[id];
     const byText = by ? (by.by ? short(by.by) : by.cause === "patient_zero" ? "P0" : "?") : "";
     return `<tr data-id="${id}" class="${state.selected === id ? "selected" : ""}">
-      <td><b>${short(id)}</b>${isPZ(id) ? " <span class='muted'>P0</span>" : ""}</td>
+      <td><b>${short(id)}</b> ${esc(nodeName(id))}${isPZ(id) ? " <span class='muted'>P0</span>" : ""}</td>
       <td>${tag(s)}</td>
       <td class="debug-only">${st.outbreak_known ? "✓" : ""}</td>
       <td>${esc(st.tick ?? "-")}</td>
-      <td class="debug-only">${s === "INCUBATING" && st.ticks_to_overt != null ? esc(st.ticks_to_overt) : ""}</td>
+      <td class="debug-only">${s !== "INCUBATING" || st.ticks_to_overt == null ? ""
+        : st.ticks_to_overt <= 0 && st.waiting_for_victim ? "waiting" : esc(st.ticks_to_overt)}</td>
       <td class="debug-only">${byText}</td>
       <td>${d.death_points[id] || ""}</td>
       <td>${d.alerts_about[id] || ""}</td>
@@ -358,8 +371,8 @@ function renderInspector() {
   const alive = s !== "DEAD" && !!g.started;
   const actions = `
     <div class="actions">
-      <button id="btn-snipe" ${alive && !g.over && (g.snipe_remaining ?? 1) > 0 ? "" : "disabled"}>Snipe</button>
-      <button id="btn-cure" class="danger" ${alive && !g.over && cureReady && (g.cure_remaining ?? 1) > 0 ? "" : "disabled"}
+      <button id="btn-snipe" ${alive && !g.over && !g.cooldown_left?.snipe && (g.snipe_remaining ?? 1) > 0 ? "" : "disabled"}>Snipe</button>
+      <button id="btn-cure" class="danger" ${alive && !g.over && cureReady && !g.cooldown_left?.cure && (g.cure_remaining ?? 1) > 0 ? "" : "disabled"}
         title="${cureReady ? "" : "cure research not at 100% yet"}">Cure</button>
     </div>
     <div id="action-msg">${esc(state.actionMsg || "")}</div>`;
@@ -367,7 +380,7 @@ function renderInspector() {
   if (pv) {
     // player view: only what someone watching the network could know
     els.inspector.innerHTML = `
-      <div class="title">${esc(id)} ${tag(shownState(id))}</div>
+      <div class="title">${esc(nodeName(id))} <span class="muted">${esc(id)}</span> ${tag(shownState(id))}</div>
       <h3>Evidence against it</h3>
       ${row("✗ cure runs lost here", d.death_points[id] || 0)}
       ${row("! suspicion (alerts about it)", d.alerts_about[id] || 0)}
@@ -381,7 +394,7 @@ function renderInspector() {
   }
 
   els.inspector.innerHTML = `
-    <div class="title">${esc(id)} ${tag(s)} ${isPZ(id) ? "<span class='muted'>patient zero</span>" : ""}</div>
+    <div class="title">${esc(nodeName(id))} <span class="muted">${esc(id)}</span> ${tag(s)} ${isPZ(id) ? "<span class='muted'>patient zero</span>" : ""}</div>
     ${row("local tick", esc(st.tick ?? "-"))}
     ${row("last status", age == null ? "none yet" : age > STALE_S
       ? `<span class="stale-warn">${age.toFixed(1)}s ago — node stuck or down?</span>` : `${age.toFixed(1)}s ago`)}
@@ -432,8 +445,7 @@ function bindInspector() {
     a.addEventListener("click", (e) => { e.preventDefault(); selectNode(a.dataset.select); }));
 }
 
-async function doAction(action) {
-  const id = state.selected;
+async function doAction(action, id = state.selected) {
   if (!id) return;
   try {
     const resp = await fetch(`/control/${id}/${action}`, { method: "POST" });
@@ -469,8 +481,11 @@ function renderStatus() {
   renderSpeed();
   els.statAlive.textContent = g.alive ?? "-";
   els.statTotal.textContent = g.total ?? "-";
-  els.snipeBudget.textContent = g.snipe_remaining ?? "-";
-  els.cureBudget.textContent = g.cure_remaining ?? "-";
+  els.snipeBudget.textContent = g.snipe_remaining ?? "∞";
+  els.cureBudget.textContent = g.cure_remaining ?? "∞";
+
+  // paused: a striped sign floating on the map, so nothing else moves
+  els.pauseSign.hidden = !(g.started && g.speed?.paused && !g.over);
 
   // g.over is decided once by the aggregator and sticks until restart
   if (g.over === "loss") {
@@ -483,9 +498,6 @@ function renderStatus() {
     els.banner.className = "paused";
     els.banner.textContent = `Time's up (${g.max_ticks} ticks). Score: ${g.score} / ${g.total} nodes alive, `
       + `${g.overt} still zombies, ${g.state_counts?.INCUBATING ?? 0} still infected.`;
-  } else if (g.started && g.speed?.paused) {
-    els.banner.className = "paused";
-    els.banner.textContent = "PAUSED";
   } else {
     els.banner.className = "";
     els.banner.textContent = "";
@@ -502,12 +514,11 @@ function setStat(el, value) {
 }
 
 function renderStrip(g) {
-  const c = g.state_counts || {};
-  setStat(els.strip.survivors, (g.alive ?? 0) - (c.OVERT ?? 0));
-  setStat(els.strip.zombies, c.OVERT ?? 0);
-  setStat(els.strip.dead, c.DEAD ?? 0);
-  setStat(els.strip.cure, `${Math.round(Math.min(1, g.cure_progress || 0) * 100)}%`);
-  setStat(els.strip.tick, `${g.tick ?? 0} / ${g.max_ticks ?? "?"}`);
+  const pct = Math.round(Math.min(1, g.cure_progress || 0) * 100);
+  setStat(els.strip.cure, `${pct}%`);
+  els.strip.cureFill.style.setProperty("--p", `${pct}%`);
+  els.strip.cureFill.parentElement.classList.toggle("ready", pct >= 100);
+  setStat(els.strip.tick, g.tick ?? 0);
 }
 
 // Non-blocking pop-up; the game keeps running underneath.
@@ -617,6 +628,30 @@ function renderCure(g) {
   else label = "researching…";
   els.cureState.textContent = label;
   els.cureState.classList.toggle("ready", ready);
+  // player toolbar: each tool is its own loader -- the cure fills with the
+  // research, then both refill while they recharge after use
+  const live = g.started && !g.over;
+  // While recharging, the bar glides towards where it will be at the END of
+  // the current day, so it is exactly full when the reload is over; then it
+  // snaps back to empty (no transition) and the tool is usable again.
+  const recharge = (action) => {
+    const left = g.cooldown_left?.[action] || 0, total = g.cooldown?.[action] || 1;
+    return left > 0 ? Math.round(((total - left + 1) / total) * 100) : null;
+  };
+  const tickMs = `${g.speed?.tick_ms ?? 400}ms`;
+  const snipeReload = recharge("snipe");
+  els.toolSnipe.style.setProperty("--fill-ms", snipeReload !== null ? tickMs : "0ms");
+  els.toolSnipe.style.setProperty("--p", `${snipeReload ?? 0}%`);
+  els.toolSnipe.disabled = !live || snipeReload !== null;
+  els.toolSnipeLabel.textContent = snipeReload !== null ? "RELOADING" : "SNIPE";
+
+  const cureReload = ready ? recharge("cure") : null;
+  const usable = ready && live && cureReload === null;
+  els.toolCure.style.setProperty("--fill-ms", cureReload !== null || !ready ? tickMs : "0ms");
+  els.toolCure.style.setProperty("--p", `${cureReload ?? pct}%`);
+  els.toolCure.classList.toggle("ready", usable);
+  els.toolCure.disabled = !usable;
+  els.toolCureLabel.textContent = usable ? "CURE" : cureReload !== null ? "RECHARGING" : `CURE ${pct}%`;
 }
 
 // -- event log -----------------------------------------------------------------
@@ -695,16 +730,18 @@ function involves(ev, id) {
 // Player view: news-style headlines for the few things a player could know
 // (what they did, what became visibly true, alerts and cure couriers).
 // null = not news; the event stays out of the feed.
+const who = (id) => `<b>${esc(nodeName(id))}</b> (${short(id)})`;
+
 function headline(ev) {
-  const n = `<b>node ${short(ev.node)}</b>`;
+  const n = who(ev.node);
   switch (ev.type) {
     case "alert_raised":
       // one story per node, not one per alert: first report, then every 5th
-      if (ev._nth === 1) return `First reports of strange behaviour around <b>node ${short(ev.about)}</b>`;
-      return ev._nth % 5 === 0 ? `<b>Node ${short(ev.about)}</b>: ${ev._nth} reports of strange behaviour so far` : null;
+      if (ev._nth === 1) return `First reports of strange behaviour around ${who(ev.about)}`;
+      return ev._nth % 5 === 0 ? `${who(ev.about)}: ${ev._nth} reports of strange behaviour so far` : null;
     case "cure_run_result":
       if (ev.success) return "Cure courier arrived — research advances";
-      return ev.died_at ? `A cure courier went missing near <b>node ${short(ev.died_at)}</b>` : null;
+      return ev.died_at ? `A cure courier went missing near ${who(ev.died_at)}` : null;
     case "state_change":
       return ev.to === "OVERT" ? `<span class="bad">ZOMBIE sighted at ${n}!</span>` : null;
     case "player_action":
@@ -734,7 +771,7 @@ function makeRow(ev) {
   div.className = `log-row cat-${cat}`;
   const t = new Date((ev.ts || Date.now() / 1000) * 1000);
   const time = t.toLocaleTimeString([], { hour12: false }) + "." + String(t.getMilliseconds()).padStart(3, "0");
-  div.innerHTML = `<span class="ts">${time}</span><span class="tick">t${esc(ev.tick ?? "?")}</span>`
+  div.innerHTML = `<span class="ts">${time}</span><span class="tick">${state.playerView ? "Day " : "t"}${esc(ev.tick ?? "?")}</span>`
     + `<span class="who">${esc(ev.node || "")}</span><span class="msg">${state.playerView ? headline(ev) : describe(ev)}</span>`;
   if (ev.path || ev.node) {
     div.classList.add("clickable");
@@ -784,12 +821,12 @@ let packetLoop = null;
 // A dot travelling along an edge for one real message (cure courier,
 // alert, infection attempt). Purely visual; drawn from observed events.
 function spawnPacket(from, to, kind) {
-  // alerts come in floods: leave room for the cure couriers
-  const limit = kind === "alert" ? MAX_PACKETS - 20 : MAX_PACKETS;
+  // alerts come in floods and heartbeats are constant: leave room for the cure couriers
+  const limit = kind === "alert" ? MAX_PACKETS - 20 : kind === "ping" ? MAX_PACKETS - 30 : MAX_PACKETS;
   if (!els.optTraffic.checked || !layers.fx || packets.length >= limit) return;
   const a = state.positions[from], b = state.positions[to];
   if (!a || !b) return;
-  const el = svgEl("circle", { class: `packet ${kind}`, r: kind === "cure" ? 6 : 4, cx: a.x, cy: a.y }, layers.fx);
+  const el = svgEl("circle", { class: `packet ${kind}`, r: kind === "cure" ? 6 : kind === "ping" ? 2.5 : 4, cx: a.x, cy: a.y }, layers.fx);
   packets.push({ el, a, b, start: performance.now() });
   if (!packetLoop) packetLoop = requestAnimationFrame(stepPackets);
 }
@@ -804,6 +841,98 @@ function stepPackets(now) {
     if (t >= 1) { p.el.remove(); packets.splice(i, 1); }
   }
   packetLoop = packets.length ? requestAnimationFrame(stepPackets) : null;
+}
+
+// Every tick each node really does ping all its neighbors; the status report
+// tells us its clock moved, so draw those heartbeats.
+function pingNeighbors(st) {
+  const last = state.lastTick[st.node];
+  state.lastTick[st.node] = st.tick;
+  if (last == null || st.tick <= last || st.state === "DEAD" || st.paused) return;
+  for (const nb of state.neighbors[st.node] || []) {
+    if (nodeState(nb) !== "DEAD") spawnPacket(st.node, nb, "ping");
+  }
+}
+
+// -- speech bubbles -----------------------------------------------------------
+
+const QUIP_GAP_MS = 1500;     // at most one new bubble this often
+const QUIP_NODE_MS = 15000;   // the same node doesn't chatter more than this
+const MAX_BUBBLES = 3;
+const lastQuip = { any: 0 };
+
+function say(id, text, { urgent = false } = {}) {
+  const now = Date.now();
+  if (!layers.bubbles || !state.positions[id] || nodeState(id) === "DEAD") return;
+  if (!urgent && (now - lastQuip.any < QUIP_GAP_MS || now - (lastQuip[id] || 0) < QUIP_NODE_MS)) return;
+  if (layers.bubbles.childNodes.length >= MAX_BUBBLES) {
+    if (!urgent) return;
+    layers.bubbles.firstChild.remove();
+  }
+  lastQuip.any = lastQuip[id] = now;
+  const p = state.positions[id];
+  const w = Math.min(260, text.length * 6.6 + 18);
+  const x = Math.max(4, Math.min(W - w - 4, p.x - w / 2));
+  const y = Math.max(4, p.y - R - 52);
+  const g = svgEl("g", { class: "bubble" }, layers.bubbles);
+  svgEl("rect", { x, y, width: w, height: 24, rx: 8 }, g);
+  svgEl("path", { d: `M ${p.x - 6} ${y + 24} L ${p.x} ${y + 32} L ${p.x + 6} ${y + 24} Z` }, g);
+  const t = svgEl("text", { x: x + w / 2, y: y + 16 }, g);
+  t.textContent = text;
+  setTimeout(() => g.remove(), 4200);
+}
+
+function worry(id) {
+  state.worriedUntil[id] = Date.now() + 6000;
+  updateNode(id);
+}
+
+function aliveNeighbor(id) {
+  const nbs = (state.neighbors[id] || []).filter((n) => !["DEAD", "OVERT"].includes(nodeState(n)));
+  return nbs.length ? nbs[Math.floor(Math.random() * nbs.length)] : null;
+}
+
+// Only reacts to things a player could know, so player view leaks nothing.
+function eventQuip(ev) {
+  switch (ev.type) {
+    case "alert_raised": {
+      const kind = ["garbled", "killed"].includes(ev.reason) ? ev.reason : "unresponsive";
+      worry(ev.node);
+      say(ev.node, quipText(kind, ev.about), { urgent: kind === "killed" });
+      break;
+    }
+    case "state_change":
+      if (ev.to === "OVERT") {
+        const witness = aliveNeighbor(ev.node);
+        if (witness) { worry(witness); say(witness, quipText("turned", ev.node), { urgent: true }); }
+      }
+      break;
+    case "cure_run_result": {
+      const path = Array.isArray(ev.path) ? ev.path : [];
+      if (ev.success && path.length) say(path[path.length - 1], quipText("courierArrived", path[0]));
+      else if (ev.died_at && path.length > 1) say(path[0], quipText("courierLost", ev.died_at));
+      break;
+    }
+    case "player_action": {
+      const witness = aliveNeighbor(ev.node);
+      if (!witness) break;
+      if (ev.action === "cure" && ev.correct) say(witness, quipText("cured", ev.node), { urgent: true });
+      else if (!ev.correct) { worry(witness); say(witness, quipText("wrongShot", ev.node), { urgent: true }); }
+      else say(witness, quipText("goodShot", ev.node), { urgent: true });
+      break;
+    }
+  }
+}
+
+// Now and then somebody just says something.
+function idleChatter() {
+  const g = state.gameStatus;
+  if (g.started && !g.over && !g.speed?.paused && state.topology) {
+    const ids = state.topology.nodes.map((n) => n.id).filter((id) => nodeState(id) !== "DEAD");
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    if (id) say(id, quipText(nodeState(id) === "OVERT" ? "zombieIdle" : "idle"));
+  }
+  setTimeout(idleChatter, 12000 + Math.random() * 18000);
 }
 
 function animate(ev) {
@@ -887,6 +1016,8 @@ function connect() {
       const anyStatus = Object.values(state.status)[0];
       if (anyStatus) {
         els.trustSlider.value = anyStatus.threshold;
+        els.pvTrust.value = anyStatus.threshold;
+        els.pvTrustValue.textContent = Number(anyStatus.threshold).toFixed(2);
         els.trustValue.textContent = Number(anyStatus.threshold).toFixed(2);
       }
       state.events = [];
@@ -907,6 +1038,7 @@ function connect() {
     }
     if (data.type === "status") {
       const st = data.status;
+      pingNeighbors(st);
       state.status[st.node] = st;
       if (st.state && nodeState(st.node) !== st.state) state.nodeStates[st.node] = { state: st.state, ts: st.ts };
       state.gameStatus = data.game_status;
@@ -921,6 +1053,7 @@ function connect() {
       pushEvent(ev);
       animate(ev);
       eventPopup(ev);
+      eventQuip(ev);
       markDirty();
     }
   };
@@ -934,6 +1067,8 @@ function renderSpeed() {
   if (!speed) return;
   els.btnPause.textContent = g.over ? "game over" : !g.started ? "▶ start" : speed.paused ? "▶ resume" : "⏸ pause";
   els.btnPause.disabled = !!g.over;
+  els.pvPause.textContent = els.btnPause.textContent;
+  els.pvPause.disabled = !!g.over;
   els.speedLabel.title = `game ends at tick ${g.max_ticks ?? "?"}`;
   els.btnPause.classList.toggle("on", speed.paused);
   els.speedButtons.forEach((b) =>
@@ -956,6 +1091,8 @@ async function setThreshold(value) {
   });
   els.trustSlider.value = value;
   els.trustValue.textContent = Number(value).toFixed(2);
+  els.pvTrust.value = value;
+  els.pvTrustValue.textContent = Number(value).toFixed(2);
 }
 
 async function startGame() {
@@ -987,9 +1124,19 @@ async function restartGame() {
 els.btnPause.addEventListener("click", () =>
   state.gameStatus.started ? setSpeed({ paused: !state.gameStatus.speed?.paused }) : startGame());
 els.btnStart.addEventListener("click", startGame);
-els.startTrustSlider.addEventListener("input", () => {
-  els.startTrustValue.textContent = Number(els.startTrustSlider.value).toFixed(2);
-});
+// one line under the slider saying what the current choice means
+function explainTrust(v) {
+  if (v <= 0.3) return "Open network: the cure moves fast, but so do the zombies.";
+  if (v < 0.65) return "Balanced: trusted channels open up over the first days.";
+  return "Lockdown: zombies spread slowly, but the cure will take a long time.";
+}
+function updateStartTrust() {
+  const v = Number(els.startTrustSlider.value);
+  els.startTrustValue.textContent = v.toFixed(2);
+  els.startTrustExplain.textContent = explainTrust(v);
+}
+els.startTrustSlider.addEventListener("input", updateStartTrust);
+updateStartTrust();
 els.btnRestart.addEventListener("click", restartGame);
 els.speedButtons.forEach((b) => b.addEventListener("click", () =>
   setSpeed({ tick_ms: Math.round(BASE_TICK_MS / Number(b.dataset.mult)) })));
@@ -1017,9 +1164,11 @@ function applyView() {
   document.body.classList.toggle("player-view", state.playerView);
   els.viewName.textContent = state.playerView ? "player view" : "debug view";
   // per-link trust/tier is node-internal knowledge
-  els.graph.classList.toggle("no-tiers", state.playerView || !els.optTiers.checked);
+  // trusted links are the player's own lever, so they show in both views
+  els.graph.classList.toggle("no-tiers", !state.playerView && !els.optTiers.checked);
   if (!state.topology) return;
-  state.topology.nodes.forEach(({ id }) => updateNode(id));
+  state.positions = layout(state.topology);
+  renderGraph();
   renderChain();
   renderTable();
   renderInspector();
@@ -1034,7 +1183,126 @@ window.addEventListener("hashchange", () => {
 
 try { els.optPlayerView.checked = localStorage.getItem("playerView") === "1"; } catch (_) { /* ignore */ }
 els.optPlayerView.addEventListener("change", applyView);
+
+// -- player toolbar ------------------------------------------------------------
+
+els.pvPause.addEventListener("click", () => els.btnPause.click());
+els.pvRestart.addEventListener("click", restartGame);
+els.pvTrust.addEventListener("input", () => {
+  els.pvTrustValue.textContent = Number(els.pvTrust.value).toFixed(2);
+});
+els.pvTrust.addEventListener("change", () => setThreshold(Number(els.pvTrust.value)));
+
+// -- drag-and-drop tools: drag SNIPE or CURE onto a node ------------------------
+
+let aim = null;
+
+function aimTarget(x, y) {
+  const id = document.elementFromPoint(x, y)?.closest?.(".node-dot")?.dataset.id;
+  return id && nodeState(id) !== "DEAD" ? id : null;
+}
+
+function markTarget(id) {
+  if (aim.target === id) return;
+  if (aim.target) nodeEls[aim.target]?.circle.classList.remove("target", "cure-target");
+  aim.target = id;
+  if (id) nodeEls[id]?.circle.classList.add("target", ...(aim.action === "cure" ? ["cure-target"] : []));
+  els.reticle.classList.toggle("locked", !!id);
+}
+
+function onAimMove(e) {
+  els.reticle.style.left = `${e.clientX}px`;
+  els.reticle.style.top = `${e.clientY}px`;
+  markTarget(aimTarget(e.clientX, e.clientY));
+}
+
+function stopAim(fire) {
+  if (!aim) return;
+  const { action, target } = aim;
+  markTarget(null);
+  aim = null;
+  document.body.classList.remove("aiming");
+  els.reticle.hidden = true;
+  window.removeEventListener("pointermove", onAimMove);
+  window.removeEventListener("pointerup", onAimRelease);
+  window.removeEventListener("pointerdown", onArmedClick, true);
+  if (fire && target) {
+    pulseNode(target);
+    doAction(action, target);
+  }
+}
+
+function startAim(e) {
+  const tool = e.currentTarget;
+  if (e.button !== 0 || tool.disabled) return;
+  e.preventDefault();
+  aim = { action: tool.dataset.action, target: null };
+  document.body.classList.add("aiming");
+  els.reticle.className = aim.action;
+  els.reticle.hidden = false;
+  aim.tool = tool;
+  onAimMove(e);
+  window.addEventListener("pointermove", onAimMove);
+  window.addEventListener("pointerup", onAimRelease);
+}
+
+// Hold-and-release fires on the node under the pointer. Releasing on the
+// tool itself (a plain click) keeps it armed: the next click fires on a
+// node, or cancels anywhere else.
+function onAimRelease(e) {
+  if (!aim) return;
+  window.removeEventListener("pointerup", onAimRelease);
+  if (aim.target) return stopAim(true);
+  if (aim.tool.contains(document.elementFromPoint(e.clientX, e.clientY))) {
+    window.addEventListener("pointerdown", onArmedClick, true);
+  } else {
+    stopAim(false);
+  }
+}
+
+function onArmedClick(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const target = aimTarget(e.clientX, e.clientY);
+  if (target) {
+    markTarget(target);
+    stopAim(true);
+  } else {
+    stopAim(false);
+  }
+}
+
+els.toolSnipe.addEventListener("pointerdown", startAim);
+els.toolCure.addEventListener("pointerdown", startAim);
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") stopAim(false); });
+
+// -- bulletin: drag the red pin up or down to resize it -------------------------
+
+const BULLETIN_MIN = 70;
+function setBulletinHeight(h) {
+  const clamped = Math.max(BULLETIN_MIN, Math.min(window.innerHeight * 0.75, h));
+  els.logPanel.style.setProperty("--bulletin-h", `${clamped}px`);
+  return clamped;
+}
+try {
+  const saved = Number(localStorage.getItem("bulletinHeight"));
+  if (saved) setBulletinHeight(saved);
+} catch (_) { /* storage unavailable */ }
+
+els.pin.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  const startY = e.clientY;
+  const startH = els.logPanel.getBoundingClientRect().height;
+  let height = startH;
+  const move = (ev) => { height = setBulletinHeight(startH + (startY - ev.clientY)); };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", () => {
+    window.removeEventListener("pointermove", move);
+    try { localStorage.setItem("bulletinHeight", String(Math.round(height))); } catch (_) { /* ignore */ }
+  }, { once: true });
+});
 applyView();
 
 buildFilters();
 connect();
+setTimeout(idleChatter, 6000);

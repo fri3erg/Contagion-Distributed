@@ -4,13 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Contagion Protocol</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=IBM+Plex+Mono:wght@400;600;700&family=Special+Elite&display=swap" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="app">
+    <div class="hazard-stripes"></div>
     <header>
-      <h1>CONTAGION <span>PROTOCOL</span> <small id="view-name">debug view</small></h1>
-      <div id="state-counts"></div>
+      <h1>CONTAGION PROTOCOL <small id="view-name">debug view</small></h1>
+      <div id="state-counts" class="debug-only"></div>
       <div id="status-bar">
         <label class="view-toggle" title="Show only what a player could actually know">
           <input type="checkbox" id="opt-player-view" /> player view
@@ -23,11 +26,8 @@
     </header>
 
     <div id="strip">
-      <div class="stat good"><span>survivors</span><b id="strip-survivors">-</b></div>
-      <div class="stat bad"><span>zombies</span><b id="strip-zombies">-</b></div>
-      <div class="stat dim"><span>dead</span><b id="strip-dead">-</b></div>
-      <div class="stat cure"><span>cure</span><b id="strip-cure">0%</b></div>
       <div class="stat dim"><span>day</span><b id="strip-tick">-</b></div>
+      <div class="stat cure"><i class="stat-fill" id="strip-cure-fill"></i><span>cure</span><b id="strip-cure">0%</b></div>
     </div>
 
     <div id="banner"></div>
@@ -35,18 +35,66 @@
 
     <main id="graph">
       <svg id="graph-svg"></svg>
+      <div id="toolbar" class="player-only">
+        <div class="tb-group">
+          <button id="pv-pause">▶ start</button>
+          <span class="speed-group">
+            <button data-mult="0.5">0.5×</button>
+            <button data-mult="1">1×</button>
+            <button data-mult="2">2×</button>
+            <button data-mult="4">4×</button>
+          </span>
+          <button id="pv-restart" class="danger" title="Throw this game away and set up a new one">↻</button>
+        </div>
+        <div class="tb-group tb-trust">
+          <label for="pv-trust">TRUST</label>
+          <input type="range" id="pv-trust" min="0" max="1" step="0.05" value="0.5" />
+          <b id="pv-trust-value">0.50</b>
+        </div>
+        <div class="tb-group tb-tools">
+          <button class="tool" id="tool-snipe" data-action="snipe" title="Drag onto a node to shoot it">
+            <span class="tool-fill" id="tool-snipe-fill"></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 1v6M12 17v6M1 12h6M17 12h6"></path></svg>
+            <span id="tool-snipe-label">SNIPE</span>
+          </button>
+          <button class="tool" id="tool-cure" data-action="cure" title="Drag onto a node to cure it (when research is done)">
+            <span class="tool-fill" id="tool-cure-fill"></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"></path></svg>
+            <span id="tool-cure-label">CURE 0%</span>
+          </button>
+        </div>
+      </div>
+      <div id="pause-sign" hidden><span>PAUSED</span></div>
+      <div id="reticle" hidden>
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="32" cy="32" r="22"></circle><circle cx="32" cy="32" r="3"></circle>
+          <path d="M32 2v18M32 44v18M2 32h18M44 32h18"></path>
+        </svg>
+      </div>
       <div id="start-overlay" hidden>
         <div class="start-card">
-          <h2>New game</h2>
+          <h2>OUTBREAK DRILL</h2>
           <p class="muted" id="start-info"></p>
           <div class="start-trust">
             <label for="start-trust-slider">Trust threshold</label>
             <input type="range" id="start-trust-slider" min="0" max="1" step="0.05" value="0.5" />
             <b id="start-trust-value">0.50</b>
           </div>
-          <p class="hint">Neighbors whose trust is above the threshold switch from cheap UDP heartbeats
-            to high-trust TCP syncs — the main way zombies spread the infection.
-            Low = more syncs, high = more isolation. You can still change it during the game.</p>
+          <p class="trust-now" id="start-trust-explain"></p>
+          <div class="trust-sides">
+            <div class="trust-side">
+              <b>LOW trust</b>
+              <p>Neighbors quickly open <span class="blue">trusted channels</span> (the blue dashed links).
+                Cure couriers only travel on those, so research is fast.</p>
+              <p class="risk">But zombies infect mostly through trusted channels too.</p>
+            </div>
+            <div class="trust-side">
+              <b>HIGH trust</b>
+              <p>Nodes keep to themselves: few trusted channels, so zombies have a hard time spreading.</p>
+              <p class="risk">But the cure has few routes and comes slowly.</p>
+            </div>
+          </div>
+          <p class="hint">You can move the slider during the game too.</p>
           <button id="btn-start">▶ Start game</button>
         </div>
       </div>
@@ -71,13 +119,15 @@
     </main>
 
     <section id="log-panel">
+      <button id="bulletin-pin" class="player-only" title="Drag up or down to resize the bulletin" aria-label="Resize bulletin"></button>
       <div id="log-toolbar">
-        <b><span class="debug-only">Event log</span><span class="player-only">News</span></b>
+        <b><span class="debug-only">Event log</span><span class="player-only">BULLETIN</span></b>
+        <span class="bulletin-stamp player-only">CONTAINMENT ZONE</span>
         <span id="log-filters" class="debug-only"></span>
-        <label><input type="checkbox" id="log-selected-only" /> selected node only</label>
-        <button id="log-pause">pause</button>
-        <button id="log-clear">clear</button>
-        <span id="log-count" class="muted"></span>
+        <label class="debug-only"><input type="checkbox" id="log-selected-only" /> selected node only</label>
+        <button class="debug-only" id="log-pause">pause</button>
+        <button class="debug-only" id="log-clear">clear</button>
+        <span id="log-count" class="muted debug-only"></span>
       </div>
       <div id="log"></div>
     </section>
@@ -92,7 +142,6 @@
             <button data-mult="1">1×</button>
             <button data-mult="2">2×</button>
             <button data-mult="4">4×</button>
-            <button data-mult="8">8×</button>
           </span>
           <button id="btn-restart" class="danger" title="Throw this game away and set up a new one">↻ restart</button>
         </div>
@@ -162,6 +211,7 @@
     </div>
   </div>
 
+  <script src="characters.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
