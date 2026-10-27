@@ -30,19 +30,20 @@ TUNABLES = {
     "START_PAUSED": "true",
     "INCUBATION_MIN": "15",
     "INCUBATION_MAX": "35",
-    "CURE_RUN_LENGTH": "5",
-    "CURE_RUNS_FOR_100": "30",
+    "CURE_RUN_LENGTH": "3",
+    "CURE_RUNS_FOR_100": "12",
     "RELAY_P_HEALTHY": "0.95",
     "RELAY_P_INFECTED": "0.30",
-    "CURE_RUN_INTERVAL_MIN": "8",
-    "CURE_RUN_INTERVAL_MAX": "15",
+    "CURE_RUN_INTERVAL_MIN": "4",
+    "CURE_RUN_INTERVAL_MAX": "8",
     "CURE_AFTER_OUTBREAK": "true",
-    "INFECT_P_BASELINE_MIN": "0.015",
-    "INFECT_P_BASELINE_MAX": "0.025",
+    "INFECT_P_BASELINE_MIN": "0.01",
+    "INFECT_P_BASELINE_MAX": "0.02",
     "INFECT_P_TRUST_MIN": "0.05",
     "INFECT_P_TRUST_MAX": "0.15",
+    "TRUST_INITIAL": "0.2",
     "TRUST_THRESHOLD_DEFAULT": "0.5",
-    "TRUST_INCREMENT_HEARTBEAT": "0.015",
+    "TRUST_INCREMENT_HEARTBEAT": "0.03",
     "TRUST_INCREMENT_SYNC": "0.015",
     "HIGH_TRUST_SYNC_PERIOD_TICKS": "4",
     "ALERT_TTL": "3",
@@ -57,9 +58,11 @@ TUNABLES = {
 }
 
 CURE_RUNS_FOR_100 = int(TUNABLES["CURE_RUNS_FOR_100"])
-SNIPE_BUDGET = "6"
-CURE_BUDGET = "6"
-MAX_TICKS = "400"  # game length cap (spec sec. 8 tick budget)
+SNIPE_BUDGET = "-1"  # -1 = unlimited
+CURE_BUDGET = "-1"
+SNIPE_COOLDOWN_TICKS = "2"  # days before the next shot
+CURE_COOLDOWN_TICKS = "2"  # days before the cure can be used again
+MAX_TICKS = "365"  # game length cap in ticks ("days"), spec sec. 8 tick budget
 
 
 def generate_graph(n: int, k: int, rewire_p: float, rng: random.Random) -> set[frozenset]:
@@ -186,6 +189,8 @@ def render_compose(topology: dict) -> str:
     lines.append(f'      CURE_BUDGET: "{CURE_BUDGET}"')
     lines.append(f'      TICK_MS: "{TUNABLES["TICK_MS"]}"')
     lines.append(f'      MAX_TICKS: "{MAX_TICKS}"')
+    lines.append(f'      SNIPE_COOLDOWN_TICKS: "{SNIPE_COOLDOWN_TICKS}"')
+    lines.append(f'      CURE_COOLDOWN_TICKS: "{CURE_COOLDOWN_TICKS}"')
     lines.append("    healthcheck:")
     lines.append('      test: ["CMD", "python", "-c", '
                  '"import urllib.request; urllib.request.urlopen(\'http://localhost:8000/status\')"]')

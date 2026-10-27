@@ -40,16 +40,20 @@ guess from the evidence on each node:
 - ! alerts its neighbours raised about it
 
 Healthy nodes also pick up some evidence from normal packet loss, so
-nothing is certain. You can **snipe** a node (kills it either way) or,
-once cure research reaches 100%, **cure** it (kills it if it was
-healthy). The trust threshold decides which links use the reliable TCP
-channel: more trust makes the cure faster but helps zombies spread.
+nothing is certain. Drag the **snipe** tool onto a node to shoot it (it
+dies either way). The **cure** tool fills up as research progresses;
+once it's ready, drag it onto a node to cure it (it kills the node if it
+was healthy). There's no limit on either, but every mistake costs a
+survivor. The trust threshold decides which links use the reliable TCP
+channel (shown as moving yellow dashes): more trust makes the cure
+faster but helps zombies spread.
 
-The game ends when the infection is gone, when every node left has
-turned, or after 400 ticks. You can pause, change speed (1× is 5 seconds
-per tick) and restart from the controls panel.
+The game ends when the infection is gone or when every node left has
+turned. You can pause, change speed (1× is 5 seconds per tick) and
+restart from the toolbar. Drag the red pin on the bulletin to make it
+taller or shorter.
 
-The **player view** checkbox hides what a player shouldn't know. With it
+The **player view** checkbox shows the game as a player sees it. With it
 off you get a debug view with the real state of every node, the
 infection chain and a full event log.
 
